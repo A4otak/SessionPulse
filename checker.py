@@ -71,7 +71,6 @@ def parse_spambot_reply(text: str) -> Tuple[str, str]:
     if any(m in low for m in frozen_markers):
         return "frozen", "Аккаунт заморожен"
 
-    # Поиск даты окончания временного спамблока
     date_match = re.search(
         r"(\d{1,2}\s+[A-Za-zА-Яа-я]+\s+\d{4},?\s+\d{1,2}:\d{2}(?:\s*UTC)?)",
         text,
@@ -80,7 +79,17 @@ def parse_spambot_reply(text: str) -> Tuple[str, str]:
         until_str = date_match.group(1) if date_match else "временный"
         return "spamblock_temp", f"Временный (до {until_str})"
 
-    return "spamblock_perm", "Вечный спамблок"
+    perm_markers = (
+        "account is limited",
+        "аккаунт ограничен",
+        "действия ограничены",
+        "спам",
+        "spam",
+    )
+    if any(m in low for m in perm_markers):
+        return "spamblock_perm", "Вечный спамблок"
+
+    return "unchecked", "Нестандартный ответ @SpamBot (проверить вручную)"
 
 
 async def check_spambot(client: TelegramClient) -> Tuple[str, str]:
@@ -97,11 +106,11 @@ async def check_spambot(client: TelegramClient) -> Tuple[str, str]:
                 response = await conv.get_response()
                 return parse_spambot_reply(response.raw_text or "")
         except Exception as e:
-            return "valid_clean", f"Ошибка @SpamBot: {type(e).__name__}"
+            return "unchecked", f"Ошибка @SpamBot: {type(e).__name__}"
     except FloodWaitError as e:
-        return "valid_clean", f"FloodWait {e.seconds}s при проверке SpamBot"
+        return "unchecked", f"FloodWait {e.seconds}s при проверке SpamBot"
     except Exception as e:
-        return "valid_clean", f"Не удалось проверить SpamBot ({type(e).__name__})"
+        return "unchecked", f"Нет ответа от @SpamBot ({type(e).__name__})"
 
 
 async def check_single_account(
