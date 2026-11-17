@@ -1,10 +1,12 @@
 import asyncio
-import csv
 import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font
+from openpyxl.utils import get_column_letter
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
@@ -66,10 +68,15 @@ def save_account_files(session_path: Path, status: str, move_files: bool) -> Non
         op(str(json_path), str(target_dir / json_path.name))
 
 
-def export_csv(results: List[AccountResult]) -> Path:
+def export_excel(results: List[AccountResult]) -> Path:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    report_path = RESULT_DIR / f"report_{timestamp}.csv"
-    fieldnames = [
+    report_path = RESULT_DIR / f"report_{timestamp}.xlsx"
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "SessionPulse Report"
+
+    headers = [
         "filename",
         "status",
         "phone",
@@ -83,11 +90,40 @@ def export_csv(results: List[AccountResult]) -> Path:
         "spambot_info",
         "proxy_used",
     ]
-    with open(report_path, "w", newline="", encoding="utf-8-sig") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter=";")
-        writer.writeheader()
-        for item in results:
-            writer.writerow(item.to_dict())
+    ws.append(headers)
+
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center")
+
+    for item in results:
+        row_data = [
+            item.filename,
+            item.status,
+            str(item.phone),
+            str(item.user_id),
+            item.username,
+            item.full_name,
+            item.dc_id,
+            "Да" if item.premium else "Нет",
+            "Да" if item.has_2fa else "Нет",
+            item.twofa_pass,
+            item.spambot_info,
+            item.proxy_used,
+        ]
+        ws.append(row_data)
+
+        # Текстовый формат для phone и user_id, чтобы Excel не превращал их в E+11
+        row_idx = ws.max_row
+        ws.cell(row=row_idx, column=3).number_format = "@"
+        ws.cell(row=row_idx, column=4).number_format = "@"
+
+    # Автоширина всех столбцов под содержимое
+    for col_idx, col_cells in enumerate(ws.columns, start=1):
+        max_len = max((len(str(c.value or "")) for c in col_cells), default=10)
+        ws.column_dimensions[get_column_letter(col_idx)].width = max_len + 4
+
+    wb.save(report_path)
     return report_path
 
 
@@ -117,7 +153,7 @@ def print_summary(results: List[AccountResult], report_path: Path) -> None:
 
     console.print()
     console.print(table)
-    console.print(f"\n[bold green]CSV-отчёт сохранён:[/bold green] {report_path}")
+    console.print(f"\n[bold green]Excel-отчёт сохранён:[/bold green] {report_path}")
 
 
 async def run() -> None:
@@ -185,7 +221,6 @@ async def run() -> None:
                     proxy_label=proxy_label,
                     check_spam=check_spam,
                 )
-                # Даём Windows 0.2с освободить дескриптор SQLite-файла .session
                 await asyncio.sleep(0.2)
                 save_account_files(session_file, res.status, move_files=move_files)
                 results.append(res)
@@ -202,7 +237,7 @@ async def run() -> None:
 
         await asyncio.gather(*(worker(i, s) for i, s in enumerate(sessions)))
 
-    report_path = export_csv(results)
+    report_path = export_excel(results)
     print_summary(results, report_path)
 
 
